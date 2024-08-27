@@ -2,7 +2,11 @@ import random
 import copy
 from territory_defs import TERRITORIES, CONTIENENTS, STARTING_TROOPS, MAX_ATTACKING_TROOPS, MAX_DEFENDING_TROOPS
 
-#TODO: Keep working on expand function,
+def remove_list_duplicates(input_list):
+    """
+    Remove duplicates from a list
+    """
+    return list(dict.fromkeys(input_list))
 
 class continent:
     def __init__(self,continent_key, continent_defs):
@@ -93,12 +97,29 @@ class board:
         return f"{self.contienents}"
 
     def input_territory_key_from_list(self, prompt, options):
+        """
+        Prompt player for territory key, require it be from a list of options
+        """
         while True:
             key = input(prompt)
             if key in options:
                 return key
             else:
-                print(f"Invali input. Please choose from {options}")
+                print(f"Invalid key Please choose from {options}")
+
+    def input_troops_bounded(self, prompt, lower_bound, upper_bound):
+        """
+        Prompt player for number of troops to move, require it be within a given range
+        """
+        while True:
+            try:
+                troops = int(input(prompt))
+                if troops >= lower_bound and troops <= upper_bound:
+                    return troops
+                else:
+                    print(f"Invalid input. Please enter a number between {lower_bound} and {upper_bound}")
+            except ValueError:
+                print("Invalid input. Please enter a number")
 
     def get_turn_player(self,idx):
         turn_player = self.turn_order[idx]
@@ -126,16 +147,23 @@ class board:
         number_of_players = len(self.players)
         for idx in range(number_of_players):
             placement_player = self.get_turn_player(idx)
-            self.place_troops_in_empty_territory(placement_player, STARTING_TROOPS)
+            self.place_troops_in_empty_territory_user(placement_player, STARTING_TROOPS)
 
     #Troop placement and movement methods
     #Place starting troops >> placement()
-    #Place troops into an empty territory >> place_troops_in_empty_territory()
+    #Place troops into an empty territory >> place_troops_in_empty_territory_user()
     #place troops into a terriroty the player occpies >> place_troops_in_occupied_territory()
     #Move troops to an unoccpied territory >> move_troops_to_unoccupied
     #attack
 
-    def place_troops_in_empty_territory(self, player, troops_to_place):
+    def place_troops_in_empty_territory(self, player, territory_key, troops_to_place):
+        """
+        Place troops on a territory
+        """
+        self.territories[territory_key].add_troops(troops_to_place)
+        self.territories[territory_key].set_occupant(player.name)
+
+    def place_troops_in_empty_territory_user(self, player, troops_to_place):
         """
         Place troops on a territory
         """
@@ -158,6 +186,7 @@ class board:
     def place_troops_in_occupied_territory(self, player, max_troops):
         """
         Place troops in a territory owned by the player
+        TODO: cancel option
         """
         placement_success = False
 
@@ -168,7 +197,7 @@ class board:
             try:
                 selected_territory = self.territories[territory_key]
                 if selected_territory.occupant == player.name:
-                    troops_to_place = int(input(f"Enter number of troops to place in {selected_territory.name} (max {max_troops}) >> "))
+                    troops_to_place = self.input_troops_bounded(f"Enter number of troops to place in {selected_territory.name} (max {max_troops}) >> ", 1, max_troops)
                     selected_territory.add_troops(troops_to_place)
                     placement_success = True
 
@@ -179,10 +208,23 @@ class board:
             except KeyError:
                 print("Invalid territory")
 
-    def count_territoires(self, player):
+            except ValueError:
+                print("Invalid input, need a number") #This might not be needed anymore
+
+    def count_player_territories(self, player):
         count = 0
         for territory in self.territories.keys():
             if self.territories[territory].occupant == player.name:
+                count += 1
+        return count
+
+    def count_unoccupied_territories(self):
+        """
+        Count the number of unoccupied territories on the board 
+        """
+        count = 0
+        for territory in self.territories.keys():
+            if self.territories[territory].occupant == None:
                 count += 1
         return count
 
@@ -238,10 +280,10 @@ class board:
     
     def recruit(self, player):
         """
-        Recruit
+        Recruit (need to implement contient bonuses)
         """
 
-        population = self.count_territoires(player)
+        population = self.count_player_territories(player)
         troops_to__recruit = population // 3
         if troops_to__recruit < 3:
             troops_to__recruit = 3
@@ -268,6 +310,19 @@ class board:
                 owned_terrs.append(territory_key)
 
         return owned_terrs
+    
+    def does_own(self, player, territory_key):
+        if self.territories[territory_key].occupant == player.name:
+            return True
+        else:
+            return False
+        
+    def owned_neighbors(self, player, territory_key):   
+        owned_neighbors = []
+        for neighbor in self.territories[territory_key].neighbors:
+            if self.territories[neighbor].occupant == player.name:
+                owned_neighbors.append(neighbor)
+        return owned_neighbors
 
     def move_troops_to_unoccupied_territory(self,player, source_territory, target_territory, number_of_troops):
         source_territory.occpying_troops -= number_of_troops
@@ -277,12 +332,63 @@ class board:
         print(f"{source_territory}")
         print(f"{target_territory}")
         
-    def expand(self, player):
-
+    def check_territories_connected(self, player, source_territory_key, target_territory_key):
         """
-        Expand Todo
-        - Ask successful attacker how many troops to move
-        - What to do if a player does not control any territories
+        Check if two territories are connected
+        Algorithm:
+        1) Start at the source territory
+        2) Check owners of the neiboring territories
+        3) If one of the neiboring territories is the target territory, return True
+        4) if one of the neiboring territories is owned by the player, add it to the list of territories to check
+        """
+        player_name = player.name
+        territories_to_check_keys = [source_territory_key] #List of territories to check
+        territories_already_checked_keys = []
+
+        source_territory_owner = self.territories[source_territory_key].occupant
+        target_territory_owner = self.territories[target_territory_key].occupant
+
+        # print(f"the source territory is owned by {source_territory_owner}")
+        # print(f"the target territory is owned by {target_territory_owner}")
+        
+        if self.does_own(player, source_territory_key) == False or self.does_own(player, target_territory_key) == False:
+            print(f"Player does not own source or target territory")
+            return False
+
+        for territory_key in territories_to_check_keys:
+
+            #territory_owner = self.territories[territory_key].occupant
+            # print(f"checking to see if {player_name} owns {territory_key}")
+            # print(f"{territory_key} is owned by {territory_owner}")
+
+            territories_already_checked_keys.append(territory_key)
+            print(f"Territories already checked: {territories_already_checked_keys}")
+
+            if self.territories[territory_key].occupant == player_name: #If the player owns the territory
+                print(f"{player} owns {territory_key}")
+
+                if territory_key == target_territory_key: #If the target territory is found, and is owned by the player, the connection is valid
+                    return True
+                
+                else:
+                    #Find the neiboring territories that are owned by the player
+                    owned_neighbors = self.owned_neighbors(player, territory_key)
+
+                    for neighbor in owned_neighbors:
+                        if neighbor not in territories_already_checked_keys:
+                            territories_to_check_keys.append(neighbor) #If the neibor hasn't already been checked, add it to the list of territories to check
+
+                    
+            #mark that the territory has been checked
+            
+                
+        return False
+
+    def expand(self, player):
+        """
+        Expand scenarios,
+        1) Expand into an un-occupied territory
+        2) Expand into an occupied territory (attack)
         """
         print(f"{player.name} is expanding")
 
@@ -294,6 +400,7 @@ class board:
         if expand == 'done':
             return False
         
+        # 1.1) Check if the player can actually expand from this territory, Player must own the territory and have more than one troop
         try:
             source_territory = self.territories[expand]
             if source_territory.occupant == player.name:
@@ -322,10 +429,9 @@ class board:
 
         try:
             target_territory = self.territories[selected_target]
-
             if target_territory.occupant != player.name and target_territory.occupant == None:
                 #Player does not own the territory and the territory is unoccupied
-                troops_to_move = int(input(f"Enter number of troops to move to {target_territory.name} (max {source_territory.occpying_troops - 1} )>> "))
+                troops_to_move = self.input_troops_bounded(f"Enter number of troops to move to {target_territory.name} (max {source_territory.occpying_troops - 1} )>> ", 1, source_territory.occpying_troops - 1)
                 print(f"{player.name} is moving {troops_to_move} troops from {source_territory.name} to {target_territory.name}")
                 self.move_troops_to_unoccupied_territory(player, source_territory, target_territory, troops_to_move)
                 return True
@@ -339,6 +445,7 @@ class board:
                 #Attacking into an occupied territory
                 max_attack_troops = min(source_territory.occpying_troops - 1, MAX_ATTACKING_TROOPS)
 
+                #Get a (valid) number of attacking troops from the attacking player
                 valid_troops = False
                 while not valid_troops:
                     try:
@@ -350,9 +457,9 @@ class board:
                     except ValueError as e:
                         print("invalid input, try again")
                 
+                #Double check the correct number of troops are being used
                 attacking_troops = min(attacking_troops, max_attack_troops)
                 defending_troops = min(target_territory.occpying_troops, MAX_DEFENDING_TROOPS)
-
 
                 attacking_rolls = self.roll6(attacking_troops)
                 defending_rolls = self.roll6(defending_troops)
@@ -363,7 +470,7 @@ class board:
                 attacking_rolls.sort(reverse = True)
                 defending_rolls.sort(reverse = True)
 
-                #Remove attacking Rolls until there are the same number of attacking/defending rolls
+                #Remove the lowest attacking Rolls until there are the same number of attacking/defending rolls
                 while len(attacking_rolls) > len(defending_rolls):
                     attacking_rolls.pop(-1)
 
@@ -376,6 +483,7 @@ class board:
 
                 number_of_battles = len(attacking_rolls)
 
+                #compare the rolls to determine who won the battle
                 for i in range(number_of_battles):
                     if attacking_rolls[i] > defending_rolls[i]:
                         defending_troops_lost += 1
@@ -385,6 +493,7 @@ class board:
                 print(f"Attackers Lost: {attacking_troops_lost}")
                 print(f"Defenders Lost: {defending_troops_lost}")
 
+                #remove troops from the battling territories
                 source_territory.remove_troops(attacking_troops_lost)
                 remaining_troops = target_territory.remove_troops(defending_troops_lost) #If remove troops takes the territory down to zero, it becomes "un-occupied"
 
@@ -393,7 +502,7 @@ class board:
                     #get how many troops to move (minimum the number surviving the attack)
                     minimum_of_troops_moving = attacking_troops - attacking_troops_lost
                     maximum_of_troops_moving = source_territory.occpying_troops - 1
-                    troops_to_move = int(input(f"How many troops to move into new territory, minimum: {minimum_of_troops_moving}, maximum: {maximum_of_troops_moving} >> "))
+                    troops_to_move = self.input_troops_bounded(f"How many troops to move into new territory, minimum: {minimum_of_troops_moving}, maximum: {maximum_of_troops_moving} >> ", minimum_of_troops_moving, maximum_of_troops_moving)
                     self.move_troops_to_unoccupied_territory(player, source_territory, target_territory, troops_to_move)
   
         except KeyError:
@@ -401,12 +510,62 @@ class board:
             return True
 
         return True
-    
+
+    # def maneuver(self, player):
+    #     """
+    #     Maneuver phase
+    #     """
+
+    #     print(f"{player.name} is maneuvering")
+
+    #     # 1) Ask turn player where maneuver should originate from, or if they are done with maneuver
+    #     owned_territories = copy.deepcopy(self.owned_territories(player))
+    #     owned_territories.append("done")     
+    #     maneuver = self.input_territory_key_from_list(f"Enter 'done' to end maneuver phase or a territory to maneuver from {owned_territories} >> ", owned_territories)
+
+    #     if maneuver == 'done':
+    #         return False
+        
+    #     # 1.1) Check if the player can actually maneuver from this territory, Player must own the territory and have more than one troop
+    #     try:
+    #         source_territory = self.territories[maneuver]
+    #         if source_territory.occupant == player.name:
+    #             if source_territory.occpying_troops > 1:
+    #                 #Player owns the territory and has more than 1 troop
+    #                 print(f"{player.name} is maneuvering from {source_territory.name}")
+    #             else:
+    #                 #Player owns the territory but only has 1 troop
+    #                 print(f"{player.name} only has 1 troop in {source_territory.name}, cannot maneuver from here")
+    #                 return True
+    #         else:
+    #             #Player does not own the territory, cannot maneuver from here
+    #             print(f"{player.name} does not own {source_territory.name}")
+    #             return True
+    #     except KeyError:
+    #         print("Invalid territory entered")
+    #         return True
+        
+    #     # 2) Ask turn player where the maneuver should move, or cancel
+    #     candidate_territories = copy.deepcopy(self.owned_territories(player))
+    #     candidate_territories.append("cancel")
+    #     selected_target = self.input_territory_key_from_list(f"Maneuver to >> {source_territory.neighbors} >> ", candidate_territories)
+
+    #     if selected_target == "cancel":
+    #         return True
+        
+    #     try:
+
+        
+
     def run_game(self):
         """
         Players is a dictionary of the player objects
         Board.territories is a dictionary of the territory objects
+
+        go through the different phases of a turn until a winner is determined
+        TODO: Maneuver phase, win condition
         """
+        number_of_players = len(self.players.keys())
         turn_idx = 0
         game_over = False
 
@@ -415,12 +574,20 @@ class board:
             current_player = self.get_turn_player(turn_idx)
             print(f"Start of {current_player.name}'s turn")
 
-            #Recruit
-            new_troops = self.recruit(current_player)
-
-            #Place new troops
-            while new_troops > 0:
-                new_troops = self.place_troops_in_occupied_territory(current_player, new_troops)
+            #Recruit or join the war
+            if self.count_player_territories(current_player) == 0 and self.count_unoccupied_territories() > 0:
+                #Join the war
+                print(f"{current_player.name} has no territories and will join the war")
+                self.place_troops_in_empty_territory_user(current_player, STARTING_TROOPS)
+            elif self.count_player_territories(current_player) == 0 and self.count_unoccupied_territories() == 0:
+                #Eliminated
+                print(f"{current_player.name} has been eliminated")
+                del self.players[current_player.name]
+            else:
+                new_troops = self.recruit(current_player)
+                #Place new troops
+                while new_troops > 0:
+                    new_troops = self.place_troops_in_occupied_territory(current_player, new_troops)
 
             #Expand
             expand = True
@@ -431,4 +598,25 @@ class board:
 
             #End of turn
             turn_idx += 1
+            if turn_idx >= number_of_players:
+                turn_idx = 0
 
+
+    #Test methods
+    def add_test_players(self):
+        self.players = {
+            'player1': player('player1'),
+            'player2': player('player2'),
+            'player3': player('player3')
+        }
+
+    def test_draft(self):
+        self.draft()
+
+
+    def setup_test_scenario(self):
+        """
+        Setup a test scenario
+        """
+        self.add_test_players()
+        self.test_draft()
